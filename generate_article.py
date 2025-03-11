@@ -267,8 +267,7 @@ with open(fileName, 'w') as file:
         file.write("### 二. 盘前快讯\n")
         file.write(get_news())
         file.write("### 三. 盘前影响\n")
-        file.write("### 四. 盘前策略\n")
-        file.write("## 先看后赞养成习惯，留言收藏人生辉煌\n")
+        file.write("### 四. 盘前策评\n")
     else:
         file.write("### 一. 盘后数据\n")
         indexes = get_index_from_east_money(indexes_post)
@@ -284,5 +283,7 @@ with open(fileName, 'w') as file:
         file.write(get_news())
         file.write("### 三. 复盘\n")
         file.write("### 四. 今日感悟\n")
-        file.write("## 先看后赞养成习惯，留言收藏人生辉煌\n")
+    file.write("### 公众号文章和模板生成脚本已收录在\n")
+    file.write("https://github.com/WatchProperMoment/financial_review\n")
+    file.write("## 先看后赞养成习惯，留言收藏人生辉煌\n")
     file.close()
