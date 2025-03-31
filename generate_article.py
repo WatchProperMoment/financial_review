@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import os
 import sys
 import time
@@ -377,7 +378,7 @@ indexes_pre = ['100.DJIA','100.NDX','100.SPX','100.FTSE','100.GDAXI','100.FCHI',
 indexes_post = ['1.000001','0.399001','0.399006','1.000688','0.899050','100.HSI','100.HSCEI',
             '124.HSTECH','100.N225','100.SENSEX','100.KS11','100.UDI','133.USDCNH','159.ecfi', '134.HSI_M']
 
-black_list = ["也门", "新股", "冲突", "知情人", "评级", "据传", "乌克兰", "俄罗斯", ".HK", "涨停", "跌停", "跟涨", "跟跌", "现涨", "现跌", "跌超", "涨超", "恒生指数", "公告", "年报"] 
+black_list = ["也门", "新股", "冲突", "知情人", "评级", "据传", "乌克兰", "俄罗斯", ".HK", "涨停", "跌停", "跟涨", "跟跌", "现涨", "现跌", "跌超", "涨超", "恒生指数", "公告", "年报", "朝鲜", "以色列", "胡塞", "财联社盯盘", "星矿数据", "南向资金"] 
 
 def main():
     flag = 0
@@ -434,6 +435,7 @@ def main():
             file.write("### 四. 今日感悟\n")
         file.write("### 公众号文章和模板生成脚本已收录在\n")
         file.write("https://github.com/WatchProperMoment/financial_review\n")
+        file.write("> 个人帐号每天只能推送一次，设为星标，可以及时收到更新通知。\n")
         file.write("## 先看后赞养成习惯，留言收藏人生辉煌\n")
         file.close()
 
