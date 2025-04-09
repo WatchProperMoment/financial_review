@@ -11,6 +11,7 @@ from selenium.webdriver.support import expected_conditions as EC
 from datetime import datetime
 from lxml import etree
 import requests
+import re
 # from longport.openapi import Config, QuoteContext
 
 # def get_index(ctx, index_list):
@@ -68,7 +69,54 @@ import requests
 #             index.append("<font color='green'>" + str(v) + "%</font>")
 #     ret = f'7. 中国金龙鱼指数ETF盘中{index[0]}，盘后{index[1]}；\n8. 富时中国3倍做多ETF盘中{index[2]}，盘后{index[3]}\n'
 #     return ret
+import os
+from openai import OpenAI
 
+def get_refine_news_from_ai(news, client):
+    prompt_1 = f"""
+        执行以下操作：
+        1-重新整理下面用三个反引号括起来的文本。
+        2-去除重复的内容。
+        3-去除与财经无关的内容。
+        4-如果该条目对股票市场有显著影响，请在该条目前缀<font color='red'>，后缀</font>
+        5-对内容润色。
+        6-按原格式输出，但去除三个反引号
+        7-不要说明处理步骤
+        ```{news}```
+        """
+    completion = client.chat.completions.create(
+        model="qwen-plus", # 此处以qwen-plus为例，可按需更换模型名称。模型列表：https://help.aliyun.com/zh/model-studio/getting-started/models
+        messages=[
+            {'role': 'system', 'content': 'You are a helpful assistant.'},
+            {'role': 'user', 'content': prompt_1}],
+        )
+    print(completion.choices[0].message.content)
+    return completion.choices[0].message.content
+
+def get_effect_from_ai(indexs, client):
+    format_1 = f"""
+        1. 短期情绪消极:中国金龙鱼指数ETF和富时中国3倍做多ETF大跌，可能引导A股和港股低开;
+        2. 内外市场联动逻辑：道指<font color='green'>-0.84%</font>,纳指<font color='green'>-2.15%</font>,标普500指数<font color='green'>-1.57%</font>,英国富时100<font color='green'>-1.57%</font>,德国DAX30<font color='green'>-1.57%</font>,法国CAC40<font color='green'>-1.57%</font>外盘短线情绪消极，可能引导A股和港股低开；
+        3. 股指期货影响：A50期指当月连续大跌，可能引导A股低开;恒生期货主连大跌，可能引导港股低开;
+    """
+    prompt_1 = f"""
+        执行以下操作：
+        1-请根据三个反引号括起来的文本信息判断对今天A股市场和港股市场开盘的影响。
+        2-根据三个反引号括起来的文本信息中的数值，应该突出强调暴跌、大跌、微跌、暴涨、大涨、微涨。
+        3-使用下面<>中的示例格式编辑输出，但不要保留前后的<>。
+        4-暴涨、大涨、微涨则需要将green替换成red。
+        5-不要说明处理步骤
+        ```{indexs}```
+        <{format_1}>
+        """
+    completion = client.chat.completions.create(
+        model="qwen-plus", # 此处以qwen-plus为例，可按需更换模型名称。模型列表：https://help.aliyun.com/zh/model-studio/getting-started/models
+        messages=[
+            {'role': 'system', 'content': 'You are a helpful assistant.'},
+            {'role': 'user', 'content': prompt_1}],
+        )
+    print(completion.choices[0].message.content)
+    return completion.choices[0].message.content
 class GenerateArticle:
     def __init__(self):
         self.china_ratio = 0
@@ -82,6 +130,7 @@ class GenerateArticle:
         self.GDAXI_ratio = 0
         self.FCHI_ratio = 0
         self.us_market_news = ''
+        self.effect_indexs = ''
 
     def get_future_from_east_money(self, future):
         #https://futsseapi.eastmoney.com/static/104_CN00Y_qt?callbackName=jQuery35102158605869136534_1741582410930&field=name,sc,dm,p,zsjd,zdf,zde,utime,o,zjsj,qrspj,h,l,mrj,mcj,vol,cclbh,zt,dt,np,wp,ccl,rz,cje,mcl,mrl,jjsj,j,lb,zf&token=1101ffec61617c99be287c1bec3085ff&_=1741582410931
@@ -91,9 +140,9 @@ class GenerateArticle:
         if future == '104_CN00Y':
             self.future_a50 = data_json["qt"]["zdf"] * 100
         if data_json['qt']['zdf'] > 0:
-            ret = f"{data_json["qt"]["name"]}<font color='red'>+{data_json["qt"]["zdf"]}%</font>"
+            ret = f"{data_json["qt"]["name"]}: <font color='red'>{data_json["qt"]["p"]}(+{round(data_json["qt"]["p"] - data_json["qt"]["qrspj"], 2)}/+{data_json["qt"]["zdf"]}%)</font>"
         else:
-            ret = f"{data_json["qt"]["name"]}<font color='green'>{data_json["qt"]["zdf"]}%</font>"
+            ret = f"{data_json["qt"]["name"]}: <font color='green'>{data_json["qt"]["p"]}({round(data_json["qt"]["p"] - data_json["qt"]["qrspj"], 2)}/{data_json["qt"]["zdf"]}%)</font>"
         print(ret)
         return ret
     def get_stock_from_east_money(stock):
@@ -143,30 +192,38 @@ class GenerateArticle:
         data_json = r.json()
         ret = []
         for item in data_json['data']['diff']:
+            can_use = True
             if item['f12'] == 'YINN':
                 item['f14'] = '富时中国3倍做多ETF'
-                self.china_3_long_ratio = item['f3']
             elif item['f12'] == 'PGJ':
                 item['f14'] = '中国金龙鱼指数ETF'
-                self.china_ratio = item['f3']
             elif item['f12'] == 'DJIA':
-                self.DJIA_ratio = item['f3']
+                pass
             elif item['f12'] == 'NDX':
-                self.NDX_ratio = item['f3']
+                pass
             elif item['f12'] == 'SPX':
-                self.SPX_ratio = item['f3']
+                pass
             elif item['f12'] == 'FTSE':
-                self.FTSE_ratio = item['f3']
+                pass
             elif item['f12'] == 'GDAXI':
-                self.GDAXI_ratio = item['f3']
+                pass
             elif item['f12'] == 'FCHI':
-                self.FCHI_ratio = item['f3']
+                pass
             elif item['f12'] == 'HSI_M':
-                self.future_hsi = item['f3']
-            if item['f3'] > 0:
-                ret.append(f"{item['f14']}<font color='red'>+{round(item['f3'] / 100, 2)}%</font>")
+                pass
             else:
-                ret.append(f"{item['f14']}<font color='green'>{round(item['f3'] / 100, 2)}%</font>")
+                can_use = False
+            if re.match(r'^-?\d+$', str(item['f3'])):
+                v = int(item['f3'])
+            else:
+                v = 0
+            if v > 0:
+                s = f"{item['f14']}: <font color='red'>{round(item['f2'] / 100, 2)}(+{round(item['f4'] / 100, 2)}/+{round(v / 100, 2)}%)</font>"
+            else:
+                s = f"{item['f14']}: <font color='green'>{round(item['f2'] / 100, 2)}({round(item['f4'] / 100, 2)}/{round(v / 100, 2)}%)</font>"
+            ret.append(s)
+            if can_use:
+                self.effect_indexs += s
         print(ret)
         return ret
 
@@ -209,7 +266,7 @@ class GenerateArticle:
         ret += f"<font color='red'>{data_json['data']['up_down_dis']['rise_num']}</font>家上涨，<font color='green'>{data_json['data']['up_down_dis']['fall_num']}</font>家下跌，"
         return ret
 
-    def get_news(self, blacklist):
+    def get_news(self, blacklist, client):
         # 设置 Chrome 浏览器选项
         chrome_options = Options()
         chrome_options.add_argument('--headless')  # 无头模式，不显示浏览器窗口
@@ -218,11 +275,11 @@ class GenerateArticle:
         chrome_options.add_argument('--enable-unsafe-swiftshader')
 
         # 设置 ChromeDriver 路径，请替换为你实际的路径
-        chromedriver_path = '/usr/bin/chromedriver'
-        service = Service(chromedriver_path)
+        # chromedriver_path = 'D:\\software\\chrome-headless-shell-win64\\chromedriver.exe'
+        # service = Service(chromedriver_path)
 
         # 创建浏览器实例
-        driver = webdriver.Chrome(service=service, options=chrome_options)
+        driver = webdriver.Chrome(options=chrome_options)
 
         # 财联社 24 小时电报页面 URL
         url = 'https://www.cls.cn/telegraph'
@@ -239,7 +296,7 @@ class GenerateArticle:
             element = driver.find_element(By.CLASS_NAME, "list-more-button")
             element.click()
             time.sleep(1)
-            for i in range(0, 3):
+            for i in range(0, 5):
                 driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
                 time.sleep(1)
 
@@ -289,86 +346,10 @@ class GenerateArticle:
         finally:
             # 关闭浏览器
             driver.quit()
-        return ret
-
-    def get_etf_effect(self):
-        ret = ''
-        if self.china_ratio > -50 and self.china_ratio < 50 and self.china_3_long_ratio > -150 and self.china_3_long_ratio < 150:
-                if (self.china_ratio > 0 and self.china_3_long_ratio < 0) or (self.china_ratio < 0 and self.china_3_long_ratio > 0):
-                    ret = "谨慎:中国金龙鱼指数ETF和富时中国3倍做多ETF涨跌不一，可能引导A股和港股振荡;\n"
-                elif self.china_ratio > 0 and self.china_3_long_ratio > 0:
-                    ret = "谨慎:中国金龙鱼指数ETF和富时中国3倍做多ETF微涨，可能引导A股和港股振荡;\n"
-                else:
-                    ret = "谨慎:中国金龙鱼指数ETF和富时中国3倍做多ETF微跌，可能引导A股和港股振荡;\n"
-        elif self.china_ratio > 50 and self.china_3_long_ratio > 150:
-            ret = "积极:中国金龙鱼指数ETF和富时中国3倍做多ETF大涨，可能引导A股和港股高开;\n"
-        else:
-            ret = "消极:中国金龙鱼指数ETF和富时中国3倍做多ETF大跌，可能引导A股和港股低开;\n"
-        return ret
-
-    def get_us_effect(self):
-        if self.us_market_news == '':
-            if self.DJIA_ratio > 0:
-                self.us_market_news = f"道指<font color='red'>+{round(self.DJIA_ratio / 100, 2)}%</font>,"
-            else:
-                self.us_market_news = f"道指<font color='green'>{round(self.DJIA_ratio / 100, 2)}%</font>,"
-            if self.NDX_ratio > 0:
-                self.us_market_news += f"纳指<font color='red'>+{round(self.NDX_ratio / 100, 2)}%</font>,"
-            else:
-                self.us_market_news += f"纳指<font color='green'>{round(self.NDX_ratio / 100, 2)}%</font>,"
-            if self.SPX_ratio > 0:
-                self.us_market_news += f"标普500指数<font color='red'>+{round(self.SPX_ratio / 100, 2)}%</font>,"
-            else:
-                self.us_market_news += f"标普500指数<font color='green'>{round(self.SPX_ratio / 100, 2)}%</font>,"
-        if self.DJIA_ratio < -200 or self.NDX_ratio < -200 or self.SPX_ratio < -200:
-            self.us_market_news += "外盘短线情绪消极，可能引导A股和港股低开；\n"
-        elif self.DJIA_ratio > 200 or self.NDX_ratio > 200 or self.SPX_ratio > 200:
-            self.us_market_news += "外盘短线情绪积极，可能引导A股和港股高开；\n"
-        else:
-            self.us_market_news += "外盘短线情绪一般，可能对A股和港股影响有限;\n"
-        return self.us_market_news
-
-    def get_future_effect(self):
-        ret = ''
-        if self.future_a50 > -50 and self.future_a50 < 50:
-            if self.future_a50 > 0:
-                ret = '富时A50期货微涨，'
-            else:
-                ret = '富时A50期货微跌，'
-            ret += '可能对A股影响有限;'
-        if self.future_a50 > 50:
-            if self.future_a50 > 100:
-                ret = '富时A50期货大涨，'
-            else:
-                ret = '富时A50期货小涨，'
-            ret += '可能引导A股高开;'
-        if self.future_a50 < -50:
-            if self.future_a50 < -100:
-                ret = '富时A50期货大跌，'
-            else:
-                ret = '富时A50期货小跌，'
-            ret += '可能引导A股低开;'
-        if self.future_hsi > -50 and self.future_hsi < 50:
-            if self.future_hsi > 0:
-                ret += '恒生期货主连微涨，'
-            else:
-                ret += '恒生期货主连微跌，'
-            ret += '可能对港股影响有限;'
-        if self.future_hsi > 50:
-            if self.future_hsi > 100:
-                ret += '恒生期货主连大涨，'
-            else:
-                ret += '恒生期货主连小涨，'
-            ret += '可能引导港股高开;'
-        if self.future_hsi < -50:
-            if self.future_hsi < -100:
-                ret += '恒生期货主连大跌，'
-            else:
-                ret += '恒生期货主连小跌，'
-            ret += '可能引导港股低开;'
-        ret += '\n'
-        return ret
-        
+        with open('temp.md', 'w', encoding='utf-8') as file:
+            file.write(ret)
+            file.close()
+        return get_refine_news_from_ai(ret, client)
         
 stocks = ['105.PGJ', '107.YINN']
 futures = ['101_GC00Y', '104_CN00Y', '112_B00Y']
@@ -397,7 +378,13 @@ def main():
     
     fileName = os.path.join("articles", fileName)
 
-    with open(fileName, 'w') as file:
+    client = OpenAI(
+        # 若没有配置环境变量，请用百炼API Key将下行替换为：api_key="sk-xxx",
+        api_key=os.getenv("DASHSCOPE_API_KEY"), 
+        base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+    )
+    
+    with open(fileName, 'w', encoding='utf-8') as file:
         file.write("## 内容仅供参考，不作投资建议。\n")
         if flag == 0:
             file.write("### 一. 盘前数据\n")
@@ -407,16 +394,16 @@ def main():
                 file.write(f'{i}. {index}；\n')
                 i += 1
             for future in futures:
-                future = ga.get_future_from_east_money(future)
-                file.write(f'{i}. {future}；\n')
+                future_ret = ga.get_future_from_east_money(future)
+                if future == '104_CN00Y':
+                    ga.effect_indexs += future_ret
+                file.write(f'{i}. {future_ret}；\n')
                 i += 1
-            file.write("### 二. 盘前快讯\n")
-            file.write(ga.get_news(black_list))
-            file.write("### 三. 盘前影响\n")
-            file.write(f"1. 短期情绪：{ga.get_etf_effect()}")
-            file.write(f"2. 内外市场联动逻辑：{ga.get_us_effect()}")
-            file.write(f"3. 股指期货影响：{ga.get_future_effect()}")
-            file.write("### 四. 盘前策评\n")
+            file.write("### 二. 盘前快讯<AI整理润色>\n")
+            file.write(ga.get_news(black_list, client))
+            file.write("\n### 三. 盘前影响<AI整理润色>\n")
+            file.write(get_effect_from_ai(ga.effect_indexs, client))
+            file.write("\n### 四. 盘前策评\n")
         else:
             file.write("### 一. 盘后数据\n")
             indexes = ga.get_index_from_east_money(indexes_post)
@@ -428,9 +415,9 @@ def main():
                 future = ga.get_future_from_east_money(future)
                 file.write(f'{i}. {future}；\n')
                 i += 1
-            file.write("### 二. 盘后快讯\n")
-            file.write(ga.get_news(black_list))
-            file.write("### 三. 复盘\n")
+            file.write("### 二. 盘后快讯<AI整理润色>\n")
+            file.write(ga.get_news(black_list, client))
+            file.write("\n### 三. 复盘\n")
             file.write(ga.get_balance_from_cls() + ga.get_up_down_from_cls() + '\n')
             file.write("### 四. 今日感悟\n")
         file.write("### 公众号文章和模板生成脚本已收录在\n")
@@ -442,4 +429,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
